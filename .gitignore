@@ -1,0 +1,13 @@
+.worktrees
+.worktrees/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.json
+.playwright-mcp/
+node_modules/
+dist/
+src-tauri/target/
+*.log
+.DS_Store
+
+focusflow-*.png

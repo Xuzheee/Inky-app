@@ -1,0 +1,115 @@
+.petRenderer {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  isolation: isolate;
+  transform: translateY(5px);
+}
+
+.petRenderer::before {
+  position: absolute;
+  inset: 7px;
+  z-index: -1;
+  content: "";
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(116, 215, 255, 0.24), rgba(185, 150, 255, 0.12) 52%, transparent 72%);
+  filter: blur(8px);
+  animation: petGlow 2.8s ease-in-out infinite;
+}
+
+.normal {
+  width: 62px;
+  height: 62px;
+}
+
+.focus {
+  width: 78px;
+  height: 78px;
+}
+
+.frame,
+.item {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.frame {
+  opacity: 0;
+  animation-duration: var(--pet-duration);
+  animation-timing-function: steps(1, end);
+  animation-iteration-count: infinite;
+  animation-delay: calc(var(--pet-duration) / var(--pet-frame-count) * var(--pet-frame-index) * -1);
+}
+
+.frameCount3 .frame {
+  animation-name: petFrame3;
+}
+
+.frameCount4 .frame {
+  animation-name: petFrame4;
+}
+
+.item {
+  z-index: var(--pet-item-z);
+  transform: translate(var(--pet-item-x), var(--pet-item-y)) rotate(var(--pet-item-rotation));
+}
+
+.fallback {
+  width: 62px;
+  height: 62px;
+  border: 1px solid rgba(116, 215, 255, 0.42);
+  border-radius: 22px 22px 18px 18px;
+  background:
+    radial-gradient(circle at 37% 38%, rgba(255, 255, 255, 0.92) 0 4px, transparent 5px),
+    radial-gradient(circle at 63% 38%, rgba(255, 255, 255, 0.92) 0 4px, transparent 5px),
+    linear-gradient(180deg, rgba(158, 226, 255, 0.76), rgba(149, 124, 255, 0.64));
+  box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.16), 0 0 34px rgba(116, 215, 255, 0.2);
+}
+
+@keyframes petFrame3 {
+  0% {
+    opacity: 1;
+  }
+
+  33.333% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes petFrame4 {
+  0% {
+    opacity: 1;
+  }
+
+  25% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes petGlow {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
