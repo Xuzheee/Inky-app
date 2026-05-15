@@ -2,8 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mood, OverlayState, TaskCategory, TaskPriority, ViewState } from '../../types';
 import { PetRenderer } from '../PetRenderer/PetRenderer';
-import type { PetExpression } from '../PetRenderer/petConfig';
+import { builtInPetSets, type PetSetConfig, type PetSetId } from '../PetRenderer/petConfig';
 import { parseTaskWithAi, type ParsedTaskDraft } from '../../utils/aiParser';
+import { loadPetSets, openPetPacksFolder } from '../../utils/petPacks';
 import {
   clearAiConfig,
   emptyAiConfigStatus,
@@ -41,12 +42,6 @@ const priorityLabel: Record<TaskPriority, string> = {
   high: '高优先级',
   medium: '中优先级',
   low: '低优先级',
-};
-
-const moodPetExpression: Record<Mood, PetExpression> = {
-  好: 'happy',
-  一般: 'normal',
-  烦: 'annoyed',
 };
 
 const POMODORO_DURATION_SECONDS = 25 * 60;
@@ -95,6 +90,8 @@ export function FocusFlowWidget() {
   const [mood, setMood] = useState<Mood>(initialFocusFlowState.mood);
   const [xp, setXp] = useState(initialFocusFlowState.xp);
   const [petName, setPetName] = useState(initialFocusFlowState.petName);
+  const [petSetId, setPetSetId] = useState<PetSetId>(initialFocusFlowState.petSetId);
+  const [availablePetSets, setAvailablePetSets] = useState<PetSetConfig[]>(builtInPetSets);
   const [isPersistenceLoaded, setIsPersistenceLoaded] = useState(false);
   const [input, setInput] = useState('');
   const [overlay, setOverlay] = useState<OverlayState>('none');
@@ -126,26 +123,27 @@ export function FocusFlowWidget() {
   const remainingTasks = tasks.filter((task) => !task.completed).length;
   const completedTasks = tasks.length - remainingTasks;
   const isAiParsing = input.trim().length > 8;
-  const petExpression = moodPetExpression[mood];
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPersistedState() {
-      const persistedState = await loadFocusFlowState();
+    async function loadInitialData() {
+      const [persistedState, petSets] = await Promise.all([loadFocusFlowState(), loadPetSets()]);
 
       if (cancelled) {
         return;
       }
 
+      setAvailablePetSets(petSets);
       setTasks(persistedState.tasks);
       setMood(persistedState.mood);
       setXp(persistedState.xp);
       setPetName(persistedState.petName);
+      setPetSetId(petSets.some((petSet) => petSet.id === persistedState.petSetId) ? persistedState.petSetId : petSets[0].id);
       setIsPersistenceLoaded(true);
     }
 
-    void loadPersistedState();
+    void loadInitialData();
 
     return () => {
       cancelled = true;
@@ -157,8 +155,8 @@ export function FocusFlowWidget() {
       return;
     }
 
-    void saveFocusFlowState({ tasks, mood, xp, petName });
-  }, [isPersistenceLoaded, tasks, mood, xp, petName]);
+    void saveFocusFlowState({ tasks, mood, xp, petName, petSetId });
+  }, [isPersistenceLoaded, tasks, mood, xp, petName, petSetId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -444,6 +442,20 @@ export function FocusFlowWidget() {
     }
   }
 
+  async function refreshPetSets() {
+    recordInteraction();
+    const petSets = await loadPetSets();
+    setAvailablePetSets(petSets);
+    setPetSetId((current) => (petSets.some((petSet) => petSet.id === current) ? current : petSets[0].id));
+    setSettingsMessage('宠物列表已刷新。');
+  }
+
+  async function openPetFolder() {
+    recordInteraction();
+    const path = await openPetPacksFolder();
+    setSettingsMessage(path ? `宠物包文件夹：${path}` : '无法打开宠物包文件夹。');
+  }
+
   function addTask(
     title: string,
     category: TaskCategory = 'idea',
@@ -625,7 +637,7 @@ export function FocusFlowWidget() {
           aria-label="恢复 Inky"
           onClick={exitMiniMode}
         >
-          <PetRenderer level={level.current.level} expression={petExpression} label={`Inky${level.current.title}`} />
+          <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`Inky Lv.${level.current.level}`} />
         </button>
         {miniHint && (
           <div className={styles.miniHint} role="status">
@@ -668,7 +680,7 @@ export function FocusFlowWidget() {
 
         <div className={styles.focusContent}>
           <div className={styles.focusPet}>
-            <PetRenderer level={level.current.level} expression="normal" size="focus" label={`Inky${level.current.title}`} />
+            <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} size="focus" label={`Inky Lv.${level.current.level}`} />
           </div>
           <p className={styles.focusLabel}>现在专注于</p>
           <h1 className={styles.focusTitle}>📝 {focusedTask.title}</h1>
@@ -746,7 +758,7 @@ export function FocusFlowWidget() {
         <main className={styles.widgetBody}>
           <section className={styles.petSection}>
             <div className={styles.petAvatar}>
-              <PetRenderer level={level.current.level} expression={petExpression} label={`Inky${level.current.title}`} />
+              <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`Inky Lv.${level.current.level}`} />
               <span className={styles.petLevel}>{level.current.level}</span>
             </div>
             <div className={styles.petInfo}>
@@ -762,7 +774,7 @@ export function FocusFlowWidget() {
                   aria-label="宠物名字"
                   maxLength={8}
                 />
-                <span>Lv.{level.current.level} {level.current.title}</span>
+                <span>Lv.{level.current.level}</span>
               </div>
               <p className={styles.petSpeech}>“准备好开始新的任务了吗？”</p>
               <div className={styles.progressBlock}>
@@ -943,6 +955,32 @@ export function FocusFlowWidget() {
                 ×
               </button>
               <p className={styles.sheetTitle} id="settings-overlay-title">设置</p>
+
+              <section className={styles.settingsSection}>
+                <h2>宠物外观</h2>
+                <p>把宠物包放进本地文件夹后刷新列表；不完整的宠物包会自动隐藏。</p>
+                <div className={styles.petSetActions}>
+                  <button type="button" onClick={openPetFolder}>打开宠物包文件夹</button>
+                  <button type="button" onClick={refreshPetSets}>刷新宠物列表</button>
+                </div>
+                <div className={styles.petSetGrid}>
+                  {availablePetSets.map((petSet) => (
+                    <button
+                      aria-pressed={petSet.id === petSetId}
+                      className={`${styles.petSetOption} ${petSet.id === petSetId ? styles.activePetSet : ''}`}
+                      key={petSet.id}
+                      type="button"
+                      onClick={() => {
+                        recordInteraction();
+                        setPetSetId(petSet.id);
+                      }}
+                    >
+                      <strong>{petSet.name}</strong>
+                      <span>{petSet.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
 
               <section className={styles.settingsSection}>
                 <h2>AI 设置</h2>

@@ -1,9 +1,9 @@
 import type { LevelConfig, LevelProgress } from '../types';
 
 export const LEVELS: LevelConfig[] = [
-  { level: 1, title: '小鲨', requiredXp: 0 },
-  { level: 2, title: '蓝鲨', requiredXp: 50 },
-  { level: 3, title: '鲨王', requiredXp: 350 },
+  { level: 1, requiredXp: 0 },
+  { level: 2, requiredXp: 50 },
+  { level: 3, requiredXp: 350 },
 ];
 
 export function getLevelProgress(xp: number): LevelProgress {

@@ -2,6 +2,7 @@
 
 mod claude;
 mod persistence;
+mod pet_packs;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -128,6 +129,8 @@ fn main() {
             claude::get_app_local_data_dir,
             persistence::load_focus_flow_state,
             persistence::save_focus_flow_state,
+            pet_packs::list_pet_packs,
+            pet_packs::open_pet_packs_folder,
             get_system_idle_ms,
             set_mini_mode,
             start_window_drag,

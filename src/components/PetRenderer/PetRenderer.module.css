@@ -42,18 +42,10 @@
 
 .frame {
   opacity: 0;
-  animation-duration: var(--pet-duration);
-  animation-timing-function: steps(1, end);
-  animation-iteration-count: infinite;
-  animation-delay: calc(var(--pet-duration) / var(--pet-frame-count) * var(--pet-frame-index) * -1);
 }
 
-.frameCount3 .frame {
-  animation-name: petFrame3;
-}
-
-.frameCount4 .frame {
-  animation-name: petFrame4;
+.activeFrame {
+  opacity: 1;
 }
 
 .item {
@@ -71,34 +63,6 @@
     radial-gradient(circle at 63% 38%, rgba(255, 255, 255, 0.92) 0 4px, transparent 5px),
     linear-gradient(180deg, rgba(158, 226, 255, 0.76), rgba(149, 124, 255, 0.64));
   box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.16), 0 0 34px rgba(116, 215, 255, 0.2);
-}
-
-@keyframes petFrame3 {
-  0% {
-    opacity: 1;
-  }
-
-  33.333% {
-    opacity: 0;
-  }
-
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes petFrame4 {
-  0% {
-    opacity: 1;
-  }
-
-  25% {
-    opacity: 0;
-  }
-
-  100% {
-    opacity: 0;
-  }
 }
 
 @keyframes petGlow {

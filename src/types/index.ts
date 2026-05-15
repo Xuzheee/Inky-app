@@ -22,7 +22,6 @@ export interface Task {
 
 export interface LevelConfig {
   level: 1 | 2 | 3;
-  title: string;
   requiredXp: number;
 }
 

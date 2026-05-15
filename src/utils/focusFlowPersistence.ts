@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { DEFAULT_PET_SET_ID, isPetSetId, type PetSetId } from '../components/PetRenderer/petConfig';
 import type { Mood, Task, TaskCategory, TaskPriority } from '../types';
 
 const taskCategories = new Set<TaskCategory>(['work', 'study', 'life', 'idea']);
@@ -6,15 +7,16 @@ const taskPriorities = new Set<TaskPriority>(['high', 'medium', 'low']);
 const moods = new Set<Mood>(['好', '一般', '烦']);
 
 export interface FocusFlowPersistedState {
-  version: 1;
+  version: 2;
   tasks: Task[];
   mood: Mood;
   xp: number;
   petName: string;
+  petSetId: PetSetId;
 }
 
 export const defaultFocusFlowState: FocusFlowPersistedState = {
-  version: 1,
+  version: 2,
   petName: 'Inky',
   tasks: [
     { id: '1', title: '回复导师邮件', category: 'work', priority: 'high', completed: false, due: '今天 16:00', completedPomodoros: 0 },
@@ -23,6 +25,7 @@ export const defaultFocusFlowState: FocusFlowPersistedState = {
   ],
   mood: '好',
   xp: 10,
+  petSetId: DEFAULT_PET_SET_ID,
 };
 
 export function cloneDefaultFocusFlowState(): FocusFlowPersistedState {
@@ -75,7 +78,7 @@ function normalizeTask(value: unknown): Task | null {
 function normalizeState(value: unknown): FocusFlowPersistedState | null {
   if (
     !isRecord(value) ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     !Array.isArray(value.tasks) ||
     typeof value.mood !== 'string' ||
     !moods.has(value.mood as Mood) ||
@@ -93,7 +96,7 @@ function normalizeState(value: unknown): FocusFlowPersistedState | null {
   }
 
   return {
-    version: 1,
+    version: 2,
     tasks: tasks as Task[],
     mood: value.mood as Mood,
     xp: Math.floor(value.xp),
@@ -101,6 +104,7 @@ function normalizeState(value: unknown): FocusFlowPersistedState | null {
       typeof value.petName === 'string' && value.petName.trim() && value.petName.trim() !== '小章章'
         ? value.petName.trim()
         : defaultFocusFlowState.petName,
+    petSetId: isPetSetId(value.petSetId) ? value.petSetId : DEFAULT_PET_SET_ID,
   };
 }
 
@@ -112,15 +116,16 @@ export async function loadFocusFlowState(): Promise<FocusFlowPersistedState> {
   }
 }
 
-export async function saveFocusFlowState(state: Pick<FocusFlowPersistedState, 'tasks' | 'mood' | 'xp' | 'petName'>) {
+export async function saveFocusFlowState(state: Pick<FocusFlowPersistedState, 'tasks' | 'mood' | 'xp' | 'petName' | 'petSetId'>) {
   try {
     await invoke('save_focus_flow_state', {
       payload: {
-        version: 1,
+        version: 2,
         tasks: state.tasks,
         mood: state.mood,
         xp: Math.max(0, Math.floor(state.xp)),
         petName: state.petName.trim() || defaultFocusFlowState.petName,
+        petSetId: isPetSetId(state.petSetId) ? state.petSetId : DEFAULT_PET_SET_ID,
       } satisfies FocusFlowPersistedState,
     });
   } catch {
