@@ -176,6 +176,7 @@
 .petSection,
 .moodBand,
 .captureForm,
+.focusCaptureForm,
 .taskItem,
 .statsBar,
 .windowTitleGroup,
@@ -183,6 +184,7 @@
 .petNameRow,
 .progressHeader,
 .taskHeader,
+.inboxViewHeader,
 .categoryActions,
 .toastHeader {
   display: flex;
@@ -486,7 +488,8 @@
 }
 
 .moodBand > span,
-.taskHeader span {
+.taskHeader span,
+.inboxViewHeader span {
   color: var(--muted-deep);
   font-family: var(--font-mono);
   font-size: 8.5px;
@@ -630,7 +633,8 @@
   opacity: 0.68;
 }
 
-.taskSection {
+.taskSection,
+.inboxView {
   position: relative;
   z-index: 1;
   min-height: 0;
@@ -639,17 +643,33 @@
   overflow: hidden;
 }
 
-.taskHeader {
+.taskHeader,
+.inboxViewHeader {
+  justify-content: space-between;
   height: 16px;
   margin-bottom: 8px;
 }
 
-.taskList {
+.inboxViewHeader button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--coral);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.taskList,
+.inboxView .inboxList {
   display: flex;
   flex-direction: column;
   gap: 6px;
   height: calc(100% - 24px);
   overflow: auto;
+}
+
+.inboxView .inboxList {
+  height: calc(100% - 114px);
 }
 
 .taskList::-webkit-scrollbar {
@@ -839,16 +859,21 @@
   white-space: nowrap;
 }
 
-.statsGroup span {
+.statsGroup span,
+.inboxStat {
   display: grid;
   justify-items: center;
   gap: 2px;
   min-width: 25px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--muted-deep);
   line-height: 1;
 }
 
-.statsGroup strong {
+.statsGroup strong,
+.inboxStat strong {
   color: var(--cyan);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -860,11 +885,17 @@
   color: var(--gold);
 }
 
-.statsGroup span:last-child strong {
+.statsGroup span:last-of-type strong {
   color: var(--violet-strong);
 }
 
-.statsGroup em {
+.activeInboxStat strong {
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(116, 215, 255, 0.32);
+}
+
+.statsGroup em,
+.inboxStat em {
   color: var(--muted);
   font-size: 8px;
   font-style: normal;
@@ -1041,7 +1072,8 @@
   color: var(--gold);
 }
 
-.petComment {
+.petComment,
+.inboxEmpty {
   margin: 0;
   padding: 10px;
   border: 1px solid rgba(185, 150, 255, 0.24);
@@ -1051,6 +1083,63 @@
   font-size: 10.5px;
   font-style: italic;
   line-height: 1.5;
+}
+
+.inboxList {
+  display: grid;
+  gap: 8px;
+  max-height: 210px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.inboxList::-webkit-scrollbar {
+  width: 0;
+}
+
+.inboxItem {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(99, 85, 116, 0.32);
+  border-radius: 10px;
+  background: rgba(20, 16, 29, 0.7);
+}
+
+.inboxItem p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.inboxItemActions,
+.inboxCategoryChoices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.inboxCategoryChoices {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.inboxItemActions button,
+.inboxCategoryChoices button {
+  min-height: 28px;
+  border: 1px solid rgba(185, 150, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(185, 150, 255, 0.1);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.inboxItemActions button:hover,
+.inboxCategoryChoices button:hover {
+  border-color: rgba(116, 215, 255, 0.46);
+  color: var(--cyan);
 }
 
 .confirmButton,
@@ -1198,6 +1287,37 @@
   border-color: rgba(116, 215, 255, 0.52);
   background: rgba(116, 215, 255, 0.14);
   color: var(--cyan);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-soft);
+}
+
+.toggleRow span {
+  display: grid;
+  gap: 3px;
+}
+
+.toggleRow strong {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.toggleRow small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.toggleRow input {
+  width: 34px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--cyan);
 }
 
 .settingsField {
@@ -1396,6 +1516,63 @@
   padding: 10px 18px;
   border-radius: 999px;
   font-size: 12px;
+}
+
+.focusCaptureForm {
+  width: min(100%, 236px);
+  margin-top: 18px;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 0.5px solid rgba(185, 150, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(20, 16, 29, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 12px 28px rgba(0, 0, 0, 0.16);
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+
+.focusCaptureForm:focus-within {
+  border-color: rgba(116, 215, 255, 0.48);
+  background: rgba(30, 24, 43, 0.72);
+  box-shadow: 0 0 22px rgba(116, 215, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.focusCaptureForm input {
+  min-width: 0;
+  flex: 1;
+  height: 24px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.focusCaptureForm input::placeholder {
+  color: #82739e;
+}
+
+.focusCaptureForm button {
+  padding: 4px 7px;
+  border: 0.5px solid rgba(185, 150, 255, 0.38);
+  border-radius: 7px;
+  background: rgba(185, 150, 255, 0.12);
+  color: #d8c6ff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.focusReturnCue {
+  min-height: 16px;
+  margin-top: 9px;
+  color: var(--cyan);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 16px rgba(116, 215, 255, 0.26);
 }
 
 .pomodoroDialog {

@@ -4,6 +4,8 @@ export type TaskPriority = 'high' | 'medium' | 'low';
 
 export type Mood = '好' | '一般' | '烦';
 
+export type InboxItemStatus = 'pending' | 'converted' | 'archived' | 'deleted';
+
 export type ViewState = 'main' | 'focus';
 
 export type OverlayState = 'none' | 'category' | 'ai-parse' | 'break' | 'level-up' | 'settings';
@@ -18,6 +20,15 @@ export interface Task {
   completed: boolean;
   due: string | null;
   completedPomodoros: number;
+}
+
+export interface InboxItem {
+  id: string;
+  text: string;
+  createdAt: string;
+  status: InboxItemStatus;
+  convertedTaskId: string | null;
+  date: string;
 }
 
 export interface LevelConfig {

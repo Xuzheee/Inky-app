@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { Mood, OverlayState, TaskCategory, TaskPriority, ViewState } from '../../types';
+import type { InboxItem, Mood, OverlayState, TaskCategory, TaskPriority, ViewState } from '../../types';
 import { PetRenderer } from '../PetRenderer/PetRenderer';
 import { builtInPetSets, type PetSetConfig, type PetSetId } from '../PetRenderer/petConfig';
 import { parseTaskWithAi, type ParsedTaskDraft } from '../../utils/aiParser';
@@ -46,6 +46,9 @@ const priorityLabel: Record<TaskPriority, string> = {
 
 const POMODORO_DURATION_SECONDS = 25 * 60;
 const TOAST_AUTO_DISMISS_MS = 5_000;
+const INBOX_CLEAR_MESSAGE_MS = 3_000;
+const FOCUS_RETURN_CUE_MS = 1_500;
+const FOCUS_RETURN_TASK_TITLE_LIMIT = 16;
 const DRIFT_THRESHOLD_MS = 15 * 60 * 1000;
 
 type ReminderType = 'cheer' | 'break' | 'drift';
@@ -84,6 +87,31 @@ function canShowReminder(type: ReminderType, mood: Mood) {
   return type !== 'cheer' || mood !== '烦';
 }
 
+function getLocalDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function createInboxItem(text: string): InboxItem {
+  const capturedAt = new Date();
+
+  return {
+    id: crypto.randomUUID(),
+    text,
+    createdAt: capturedAt.toISOString(),
+    status: 'pending',
+    convertedTaskId: null,
+    date: getLocalDateString(capturedAt),
+  };
+}
+
+function truncateFocusReturnTitle(title: string) {
+  return title.length > FOCUS_RETURN_TASK_TITLE_LIMIT ? `${title.slice(0, FOCUS_RETURN_TASK_TITLE_LIMIT)}...` : title;
+}
+
 export function FocusFlowWidget() {
   const [initialFocusFlowState] = useState(cloneDefaultFocusFlowState);
   const [tasks, setTasks] = useState(initialFocusFlowState.tasks);
@@ -91,10 +119,17 @@ export function FocusFlowWidget() {
   const [xp, setXp] = useState(initialFocusFlowState.xp);
   const [petName, setPetName] = useState(initialFocusFlowState.petName);
   const [petSetId, setPetSetId] = useState<PetSetId>(initialFocusFlowState.petSetId);
+  const [inboxItems, setInboxItems] = useState(initialFocusFlowState.inboxItems);
+  const [showFocusReturn, setShowFocusReturn] = useState(initialFocusFlowState.showFocusReturn);
   const [availablePetSets, setAvailablePetSets] = useState<PetSetConfig[]>(builtInPetSets);
   const [isPersistenceLoaded, setIsPersistenceLoaded] = useState(false);
   const [input, setInput] = useState('');
+  const [focusInput, setFocusInput] = useState('');
+  const [focusReturnCue, setFocusReturnCue] = useState('');
+  const [isInboxView, setIsInboxView] = useState(false);
+  const [inboxClearMessage, setInboxClearMessage] = useState('');
   const [overlay, setOverlay] = useState<OverlayState>('none');
+  const [convertingInboxItemId, setConvertingInboxItemId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>('main');
   const [isMiniMode, setIsMiniMode] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
@@ -104,6 +139,8 @@ export function FocusFlowWidget() {
   const [timeLeft, setTimeLeft] = useState(POMODORO_DURATION_SECONDS);
   const [pomodoroEndsAt, setPomodoroEndsAt] = useState<number | null>(null);
   const parseRequestId = useRef(0);
+  const convertingInboxItemIds = useRef(new Set<string>());
+  const focusReturnCueTimer = useRef<number | null>(null);
   const pomodoroAwardedForCycle = useRef(false);
   const [toast, setToast] = useState<Reminder | null>(null);
   const [miniHint, setMiniHint] = useState<Reminder | null>(null);
@@ -120,9 +157,15 @@ export function FocusFlowWidget() {
   const level = useMemo(() => getLevelProgress(xp), [xp]);
   const focusedTask = tasks.find((task) => task.id === focusedTaskId) ?? null;
   const sortedTasks = [...tasks].sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
+  const pendingInboxItems = inboxItems.filter((item) => item.status === 'pending');
+  const pendingInboxCount = pendingInboxItems.length;
   const remainingTasks = tasks.filter((task) => !task.completed).length;
   const completedTasks = tasks.length - remainingTasks;
-  const isAiParsing = input.trim().length > 8;
+  const isAiParsing = !isInboxView && input.trim().length > 8;
+  const captureSubmitLabel = isInboxView ? '存入' : isAiParsing ? 'AI 解析' : '添加';
+  const capturePlaceholder = isInboxView ? '随手记，不用想太多...' : '添加一条任务...';
+  const captureAriaLabel = isInboxView ? '快速记录 Inbox 内容' : '快速记录任务';
+  const mainPetSpeech = petComment || (pendingInboxCount > 8 ? 'Inbox 快装满了，找个时间整理一下？' : '准备好开始新的任务了吗？');
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +183,8 @@ export function FocusFlowWidget() {
       setXp(persistedState.xp);
       setPetName(persistedState.petName);
       setPetSetId(petSets.some((petSet) => petSet.id === persistedState.petSetId) ? persistedState.petSetId : petSets[0].id);
+      setInboxItems(persistedState.inboxItems);
+      setShowFocusReturn(persistedState.showFocusReturn);
       setIsPersistenceLoaded(true);
     }
 
@@ -155,8 +200,8 @@ export function FocusFlowWidget() {
       return;
     }
 
-    void saveFocusFlowState({ tasks, mood, xp, petName, petSetId });
-  }, [isPersistenceLoaded, tasks, mood, xp, petName, petSetId]);
+    void saveFocusFlowState({ tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn });
+  }, [isPersistenceLoaded, tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +241,22 @@ export function FocusFlowWidget() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
+
+  useEffect(() => {
+    if (!inboxClearMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setInboxClearMessage(''), INBOX_CLEAR_MESSAGE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [inboxClearMessage]);
+
+  useEffect(() => {
+    return () => {
+      clearFocusReturnCue();
+    };
+  }, []);
 
   useEffect(() => {
     if (!miniHint) {
@@ -342,6 +403,25 @@ export function FocusFlowWidget() {
     dismissMiniHint();
   }
 
+  function clearFocusReturnCue() {
+    if (focusReturnCueTimer.current !== null) {
+      window.clearTimeout(focusReturnCueTimer.current);
+      focusReturnCueTimer.current = null;
+    }
+
+    setFocusReturnCue('');
+  }
+
+  function showFocusReturnCue(taskTitle: string) {
+    clearFocusReturnCue();
+
+    setFocusReturnCue(`✓ 已存入 Inbox · 回到 → ${truncateFocusReturnTitle(taskTitle)}`);
+    focusReturnCueTimer.current = window.setTimeout(() => {
+      setFocusReturnCue('');
+      focusReturnCueTimer.current = null;
+    }, FOCUS_RETURN_CUE_MS);
+  }
+
   function updatePetName(value: string) {
     setPetName(value.trim() || defaultFocusFlowState.petName);
   }
@@ -378,6 +458,74 @@ export function FocusFlowWidget() {
     recordInteraction();
     setSettingsMessage('');
     setOverlay('settings');
+  }
+
+  function toggleInboxView() {
+    recordInteraction();
+    setInput('');
+    setConvertingInboxItemId(null);
+    setIsInboxView((current) => !current);
+  }
+
+  function finishInboxProcessing(willClearPendingItems: boolean) {
+    if (!willClearPendingItems) {
+      return;
+    }
+
+    setConvertingInboxItemId(null);
+    setInboxClearMessage('Inbox 已经清空啦。');
+  }
+
+  function updateInboxItemStatus(itemId: string, status: 'archived' | 'deleted') {
+    recordInteraction();
+    setInboxItems((current) => current.map((item) => (item.id === itemId ? { ...item, status } : item)));
+    finishInboxProcessing(pendingInboxCount <= 1);
+  }
+
+  function deletePendingInboxItems() {
+    recordInteraction();
+    setInboxItems((current) => current.map((item) => (item.status === 'pending' ? { ...item, status: 'deleted' as const } : item)));
+    finishInboxProcessing(pendingInboxCount > 0);
+  }
+
+  function startConvertingInboxItem(itemId: string) {
+    recordInteraction();
+    setConvertingInboxItemId(itemId);
+  }
+
+  function convertInboxItem(itemId: string, category: TaskCategory) {
+    recordInteraction();
+
+    if (convertingInboxItemIds.current.has(itemId)) {
+      return;
+    }
+
+    const inboxItem = inboxItems.find((item) => item.id === itemId && item.status === 'pending');
+
+    if (!inboxItem) {
+      setConvertingInboxItemId(null);
+      return;
+    }
+
+    convertingInboxItemIds.current.add(itemId);
+    const taskId = crypto.randomUUID();
+
+    setTasks((current) => [
+      {
+        id: taskId,
+        title: inboxItem.text,
+        category,
+        priority: 'medium',
+        due: null,
+        completed: false,
+        completedPomodoros: 0,
+      },
+      ...current,
+    ]);
+    setInboxItems((current) =>
+      current.map((item) => (item.id === itemId ? { ...item, status: 'converted' as const, convertedTaskId: taskId } : item)),
+    );
+    finishInboxProcessing(pendingInboxCount <= 1);
   }
 
   function closeSettings() {
@@ -481,6 +629,23 @@ export function FocusFlowWidget() {
     resetParsedState();
   }
 
+  function handleFocusCaptureSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    recordInteraction();
+    const title = focusInput.trim();
+
+    if (!title) {
+      return;
+    }
+
+    setFocusInput('');
+    setInboxItems((current) => [createInboxItem(title), ...current]);
+
+    if (showFocusReturn && focusedTask) {
+      showFocusReturnCue(focusedTask.title);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     recordInteraction();
@@ -491,6 +656,13 @@ export function FocusFlowWidget() {
     }
 
     resetParsedState();
+
+    if (isInboxView) {
+      setInput('');
+      setInboxItems((current) => [createInboxItem(title), ...current]);
+      setInboxClearMessage('');
+      return;
+    }
 
     if (title.length <= 8) {
       setOverlay('category');
@@ -582,6 +754,7 @@ export function FocusFlowWidget() {
 
   function startFocus(taskId: string) {
     recordInteraction();
+    clearFocusReturnCue();
     setFocusedTaskId(taskId);
     setView('focus');
     setOverlay('none');
@@ -593,6 +766,7 @@ export function FocusFlowWidget() {
 
   function leaveFocusSession() {
     recordInteraction();
+    clearFocusReturnCue();
     setOverlay('none');
     setView('main');
     setFocusedTaskId(null);
@@ -689,6 +863,23 @@ export function FocusFlowWidget() {
           <button className={styles.primaryButton} type="button" onClick={leaveFocusSession}>
             暂停并返回
           </button>
+          <form className={styles.focusCaptureForm} onSubmit={handleFocusCaptureSubmit}>
+            <input
+              value={focusInput}
+              onChange={(event) => {
+                recordInteraction();
+                setFocusInput(event.target.value);
+              }}
+              placeholder="冒出的念头先放这里..."
+              aria-label="专注中快速记录 Inbox 内容"
+            />
+            {focusInput.trim() && <button type="submit">存入</button>}
+          </form>
+          {focusReturnCue && (
+            <div className={styles.focusReturnCue} role="status">
+              {focusReturnCue}
+            </div>
+          )}
         </div>
 
         <footer className={styles.statsBar}>
@@ -776,7 +967,7 @@ export function FocusFlowWidget() {
                 />
                 <span>Lv.{level.current.level}</span>
               </div>
-              <p className={styles.petSpeech}>“准备好开始新的任务了吗？”</p>
+              <p className={styles.petSpeech}>“{mainPetSpeech}”</p>
               <div className={styles.progressBlock}>
                 <div className={styles.progressHeader}>
                   <span>{xp} XP</span>
@@ -817,54 +1008,95 @@ export function FocusFlowWidget() {
                 recordInteraction();
                 setInput(event.target.value);
               }}
-              placeholder="随时记下想法..."
-              aria-label="快速记录任务"
+              placeholder={capturePlaceholder}
+              aria-label={captureAriaLabel}
               disabled={isParsingTask}
             />
             {input.trim() && (
               <button type="submit" disabled={isParsingTask}>
-                {isParsingTask ? '解析中' : isAiParsing ? 'AI 解析' : 'Enter ↵'}
+                {isParsingTask ? '解析中' : captureSubmitLabel}
               </button>
             )}
           </form>
+          {isInboxView ? (
+            <section className={styles.inboxView}>
+              <div className={styles.inboxViewHeader}>
+                <span>Inbox ({pendingInboxCount})</span>
+                {pendingInboxCount > 0 && <button type="button" onClick={deletePendingInboxItems}>全部删除</button>}
+              </div>
+              {pendingInboxItems.length > 0 ? (
+                <div className={styles.inboxList}>
+                  {pendingInboxItems.map((item) => (
+                    <article className={styles.inboxItem} key={item.id}>
+                      <p>{item.text}</p>
+                      {convertingInboxItemId === item.id ? (
+                        <div className={styles.inboxCategoryChoices} aria-label="选择任务分类">
+                          {(['work', 'study', 'life', 'idea'] as TaskCategory[]).map((category) => (
+                            <button
+                              aria-label={`将「${item.text}」转为${categoryLabel[category]}任务`}
+                              className={styles[category]}
+                              disabled={convertingInboxItemIds.current.has(item.id)}
+                              type="button"
+                              key={category}
+                              onClick={() => convertInboxItem(item.id, category)}
+                            >
+                              {categoryIcon[category]} {categoryLabel[category]}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={styles.inboxItemActions}>
+                          <button type="button" onClick={() => startConvertingInboxItem(item.id)} aria-label={`将「${item.text}」转为任务`}>转任务</button>
+                          <button type="button" onClick={() => updateInboxItemStatus(item.id, 'archived')} aria-label={`存档「${item.text}」`}>存档</button>
+                          <button type="button" onClick={() => updateInboxItemStatus(item.id, 'deleted')} aria-label={`删除「${item.text}」`}>删除</button>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                inboxClearMessage && <p className={styles.inboxEmpty}>{inboxClearMessage}</p>
+              )}
+            </section>
+          ) : (
+            <section className={styles.taskSection}>
+              <div className={styles.taskHeader}>
+                <span>今日任务 ({remainingTasks})</span>
+              </div>
 
-          <section className={styles.taskSection}>
-            <div className={styles.taskHeader}>
-              <span>今日任务 ({remainingTasks})</span>
-            </div>
-
-            <div className={styles.taskList}>
-              {sortedTasks.map((task) => (
-                <article className={`${styles.taskItem} ${task.completed ? styles.completedTask : ''}`} key={task.id}>
-                  <button
-                    aria-label={task.completed ? '标记为未完成' : '标记为完成'}
-                    className={styles.checkButton}
-                    type="button"
-                    onClick={() => toggleTask(task.id)}
-                  >
-                    {task.completed ? '✓' : ''}
-                  </button>
-                  <div className={styles.taskBody}>
-                    <strong title={task.title}>{task.title}</strong>
-                    <span className={`${styles.categoryTag} ${styles[task.category]}`}>
-                      {categoryIcon[task.category]} {categoryLabel[task.category]}
-                    </span>
-                    <span className={styles.pomodoroTag}>番茄 {task.completedPomodoros}</span>
-                  </div>
-                  {!task.completed && (
-                    <div className={styles.taskActions}>
-                      <button type="button" onClick={() => startFocus(task.id)} aria-label="开始专注">
-                        ▶
-                      </button>
-                      <button type="button" onClick={() => removeTask(task.id)} aria-label="删除任务">
-                        ×
-                      </button>
+              <div className={styles.taskList}>
+                {sortedTasks.map((task) => (
+                  <article className={`${styles.taskItem} ${task.completed ? styles.completedTask : ''}`} key={task.id}>
+                    <button
+                      aria-label={task.completed ? '标记为未完成' : '标记为完成'}
+                      className={styles.checkButton}
+                      type="button"
+                      onClick={() => toggleTask(task.id)}
+                    >
+                      {task.completed ? '✓' : ''}
+                    </button>
+                    <div className={styles.taskBody}>
+                      <strong title={task.title}>{task.title}</strong>
+                      <span className={`${styles.categoryTag} ${styles[task.category]}`}>
+                        {categoryIcon[task.category]} {categoryLabel[task.category]}
+                      </span>
+                      <span className={styles.pomodoroTag}>番茄 {task.completedPomodoros}</span>
                     </div>
-                  )}
-                </article>
-              ))}
-            </div>
-          </section>
+                    {!task.completed && (
+                      <div className={styles.taskActions}>
+                        <button type="button" onClick={() => startFocus(task.id)} aria-label="开始专注">
+                          ▶
+                        </button>
+                        <button type="button" onClick={() => removeTask(task.id)} aria-label="删除任务">
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </main>
 
         <footer className={styles.statsBar}>
@@ -873,6 +1105,15 @@ export function FocusFlowWidget() {
             <span><strong>{completedTasks}</strong><em>完成</em></span>
             <span><strong>3 🔥</strong><em>连续</em></span>
             <span><strong>{xp}</strong><em>XP</em></span>
+            <button
+              className={`${styles.inboxStat} ${isInboxView ? styles.activeInboxStat : ''}`}
+              type="button"
+              aria-pressed={isInboxView}
+              aria-label={`${isInboxView ? '返回任务界面' : '进入 Inbox'}，${pendingInboxCount} 条待处理`}
+              onClick={toggleInboxView}
+            >
+              <strong>◎ {pendingInboxCount}</strong><em>Inbox</em>
+            </button>
           </div>
         </footer>
 
@@ -943,6 +1184,7 @@ export function FocusFlowWidget() {
           </div>
         )}
 
+
         {overlay === 'settings' && (
           <div className={styles.scrim}>
             <div
@@ -980,6 +1222,24 @@ export function FocusFlowWidget() {
                     </button>
                   ))}
                 </div>
+              </section>
+
+              <section className={styles.settingsSection}>
+                <h2>专注辅助</h2>
+                <label className={styles.toggleRow}>
+                  <span>
+                    <strong>专注时显示回神引导</strong>
+                    <small>把冒出的念头放进 Inbox 后，轻轻提醒你回到当前任务。</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={showFocusReturn}
+                    onChange={(event) => {
+                      recordInteraction();
+                      setShowFocusReturn(event.target.checked);
+                    }}
+                  />
+                </label>
               </section>
 
               <section className={styles.settingsSection}>
