@@ -8,7 +8,7 @@ const moods = new Set<Mood>(['好', '一般', '烦']);
 const inboxStatuses = new Set<InboxItemStatus>(['pending', 'converted', 'archived', 'deleted']);
 
 export interface FocusFlowPersistedState {
-  version: 3;
+  version: 4;
   tasks: Task[];
   inboxItems: InboxItem[];
   mood: Mood;
@@ -16,10 +16,11 @@ export interface FocusFlowPersistedState {
   petName: string;
   petSetId: PetSetId;
   showFocusReturn: boolean;
+  hasCompletedPetNaming: boolean;
 }
 
 export const defaultFocusFlowState: FocusFlowPersistedState = {
-  version: 3,
+  version: 4,
   petName: 'Inky',
   tasks: [
     { id: '1', title: '回复导师邮件', category: 'work', priority: 'high', completed: false, due: '今天 16:00', completedPomodoros: 0 },
@@ -31,6 +32,7 @@ export const defaultFocusFlowState: FocusFlowPersistedState = {
   xp: 10,
   petSetId: DEFAULT_PET_SET_ID,
   showFocusReturn: true,
+  hasCompletedPetNaming: false,
 };
 
 export function cloneDefaultFocusFlowState(): FocusFlowPersistedState {
@@ -119,7 +121,7 @@ function normalizeInboxItem(value: unknown): InboxItem | null {
 function normalizeState(value: unknown): FocusFlowPersistedState | null {
   if (
     !isRecord(value) ||
-    value.version !== 3 ||
+    !(value.version === 3 || value.version === 4) ||
     !Array.isArray(value.tasks) ||
     !Array.isArray(value.inboxItems) ||
     typeof value.mood !== 'string' ||
@@ -139,7 +141,7 @@ function normalizeState(value: unknown): FocusFlowPersistedState | null {
   }
 
   return {
-    version: 3,
+    version: 4,
     tasks: tasks as Task[],
     inboxItems: inboxItems as InboxItem[],
     mood: value.mood as Mood,
@@ -150,6 +152,7 @@ function normalizeState(value: unknown): FocusFlowPersistedState | null {
         : defaultFocusFlowState.petName,
     petSetId: isPetSetId(value.petSetId) ? value.petSetId : DEFAULT_PET_SET_ID,
     showFocusReturn: typeof value.showFocusReturn === 'boolean' ? value.showFocusReturn : true,
+    hasCompletedPetNaming: value.hasCompletedPetNaming === true,
   };
 }
 
@@ -162,12 +165,15 @@ export async function loadFocusFlowState(): Promise<FocusFlowPersistedState> {
 }
 
 export async function saveFocusFlowState(
-  state: Pick<FocusFlowPersistedState, 'tasks' | 'inboxItems' | 'mood' | 'xp' | 'petName' | 'petSetId' | 'showFocusReturn'>,
+  state: Pick<
+    FocusFlowPersistedState,
+    'tasks' | 'inboxItems' | 'mood' | 'xp' | 'petName' | 'petSetId' | 'showFocusReturn' | 'hasCompletedPetNaming'
+  >,
 ) {
   try {
     await invoke('save_focus_flow_state', {
       payload: {
-        version: 3,
+        version: 4,
         tasks: state.tasks,
         inboxItems: state.inboxItems,
         mood: state.mood,
@@ -175,6 +181,7 @@ export async function saveFocusFlowState(
         petName: state.petName.trim() || defaultFocusFlowState.petName,
         petSetId: isPetSetId(state.petSetId) ? state.petSetId : DEFAULT_PET_SET_ID,
         showFocusReturn: state.showFocusReturn,
+        hasCompletedPetNaming: state.hasCompletedPetNaming,
       } satisfies FocusFlowPersistedState,
     });
   } catch {
