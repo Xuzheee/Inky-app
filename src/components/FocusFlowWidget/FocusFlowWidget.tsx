@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxItem, Mood, OverlayState, TaskCategory, TaskPriority, ViewState } from '../../types';
 import { PetRenderer } from '../PetRenderer/PetRenderer';
 import { builtInPetSets, type PetSetConfig, type PetSetId } from '../PetRenderer/petConfig';
@@ -121,6 +121,8 @@ export function FocusFlowWidget() {
   const [petSetId, setPetSetId] = useState<PetSetId>(initialFocusFlowState.petSetId);
   const [inboxItems, setInboxItems] = useState(initialFocusFlowState.inboxItems);
   const [showFocusReturn, setShowFocusReturn] = useState(initialFocusFlowState.showFocusReturn);
+  const [hasCompletedPetNaming, setHasCompletedPetNaming] = useState(initialFocusFlowState.hasCompletedPetNaming);
+  const [petNamingDraft, setPetNamingDraft] = useState(initialFocusFlowState.petName);
   const [availablePetSets, setAvailablePetSets] = useState<PetSetConfig[]>(builtInPetSets);
   const [isPersistenceLoaded, setIsPersistenceLoaded] = useState(false);
   const [input, setInput] = useState('');
@@ -130,6 +132,8 @@ export function FocusFlowWidget() {
   const [inboxClearMessage, setInboxClearMessage] = useState('');
   const [overlay, setOverlay] = useState<OverlayState>('none');
   const [convertingInboxItemId, setConvertingInboxItemId] = useState<string | null>(null);
+  const [draggedInboxItemId, setDraggedInboxItemId] = useState<string | null>(null);
+  const [activeInboxDropZone, setActiveInboxDropZone] = useState<'convert' | 'delete' | null>(null);
   const [view, setView] = useState<ViewState>('main');
   const [isMiniMode, setIsMiniMode] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
@@ -182,6 +186,8 @@ export function FocusFlowWidget() {
       setMood(persistedState.mood);
       setXp(persistedState.xp);
       setPetName(persistedState.petName);
+      setHasCompletedPetNaming(persistedState.hasCompletedPetNaming);
+      setPetNamingDraft(persistedState.petName);
       setPetSetId(petSets.some((petSet) => petSet.id === persistedState.petSetId) ? persistedState.petSetId : petSets[0].id);
       setInboxItems(persistedState.inboxItems);
       setShowFocusReturn(persistedState.showFocusReturn);
@@ -200,8 +206,8 @@ export function FocusFlowWidget() {
       return;
     }
 
-    void saveFocusFlowState({ tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn });
-  }, [isPersistenceLoaded, tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn]);
+    void saveFocusFlowState({ tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn, hasCompletedPetNaming });
+  }, [isPersistenceLoaded, tasks, inboxItems, mood, xp, petName, petSetId, showFocusReturn, hasCompletedPetNaming]);
 
   useEffect(() => {
     let cancelled = false;
@@ -403,6 +409,24 @@ export function FocusFlowWidget() {
     dismissMiniHint();
   }
 
+  const shouldShowPetNamingDialog =
+    isPersistenceLoaded && !hasCompletedPetNaming && view === 'main' && !isMiniMode && overlay === 'none' && !isInboxView;
+
+  function confirmPetNaming() {
+    recordInteraction();
+    const nextPetName = petNamingDraft.trim() || defaultFocusFlowState.petName;
+    setPetName(nextPetName);
+    setPetNamingDraft(nextPetName);
+    setHasCompletedPetNaming(true);
+  }
+
+  function skipPetNaming() {
+    recordInteraction();
+    setPetName(defaultFocusFlowState.petName);
+    setPetNamingDraft(defaultFocusFlowState.petName);
+    setHasCompletedPetNaming(true);
+  }
+
   function clearFocusReturnCue() {
     if (focusReturnCueTimer.current !== null) {
       window.clearTimeout(focusReturnCueTimer.current);
@@ -491,6 +515,43 @@ export function FocusFlowWidget() {
   function startConvertingInboxItem(itemId: string) {
     recordInteraction();
     setConvertingInboxItemId(itemId);
+  }
+
+  function handleInboxDragStart(itemId: string, event: DragEvent<HTMLElement>) {
+    recordInteraction();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', itemId);
+    setDraggedInboxItemId(itemId);
+  }
+
+  function handleInboxDragEnd() {
+    setDraggedInboxItemId(null);
+    setActiveInboxDropZone(null);
+  }
+
+  function handleInboxDropZoneDragOver(zone: 'convert' | 'delete', event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setActiveInboxDropZone(zone);
+  }
+
+  function handleInboxDropZoneDrop(zone: 'convert' | 'delete', event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const itemId = event.dataTransfer.getData('text/plain') || draggedInboxItemId;
+
+    setDraggedInboxItemId(null);
+    setActiveInboxDropZone(null);
+
+    if (!itemId) {
+      return;
+    }
+
+    if (zone === 'convert') {
+      startConvertingInboxItem(itemId);
+      return;
+    }
+
+    updateInboxItemStatus(itemId, 'deleted');
   }
 
   function convertInboxItem(itemId: string, category: TaskCategory) {
@@ -808,10 +869,10 @@ export function FocusFlowWidget() {
         <button
           className={styles.miniPetButton}
           type="button"
-          aria-label="恢复 Inky"
+          aria-label={`恢复 ${petName}`}
           onClick={exitMiniMode}
         >
-          <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`Inky Lv.${level.current.level}`} />
+          <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`${petName} Lv.${level.current.level}`} />
         </button>
         {miniHint && (
           <div className={styles.miniHint} role="status">
@@ -854,7 +915,7 @@ export function FocusFlowWidget() {
 
         <div className={styles.focusContent}>
           <div className={styles.focusPet}>
-            <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} size="focus" label={`Inky Lv.${level.current.level}`} />
+            <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} size="focus" label={`${petName} Lv.${level.current.level}`} />
           </div>
           <p className={styles.focusLabel}>现在专注于</p>
           <h1 className={styles.focusTitle}>📝 {focusedTask.title}</h1>
@@ -949,7 +1010,7 @@ export function FocusFlowWidget() {
         <main className={styles.widgetBody}>
           <section className={styles.petSection}>
             <div className={styles.petAvatar}>
-              <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`Inky Lv.${level.current.level}`} />
+              <PetRenderer petSets={availablePetSets} petSetId={petSetId} level={level.current.level} label={`${petName} Lv.${level.current.level}`} />
               <span className={styles.petLevel}>{level.current.level}</span>
             </div>
             <div className={styles.petInfo}>
@@ -1025,35 +1086,58 @@ export function FocusFlowWidget() {
                 {pendingInboxCount > 0 && <button type="button" onClick={deletePendingInboxItems}>全部删除</button>}
               </div>
               {pendingInboxItems.length > 0 ? (
-                <div className={styles.inboxList}>
-                  {pendingInboxItems.map((item) => (
-                    <article className={styles.inboxItem} key={item.id}>
-                      <p>{item.text}</p>
-                      {convertingInboxItemId === item.id ? (
-                        <div className={styles.inboxCategoryChoices} aria-label="选择任务分类">
-                          {(['work', 'study', 'life', 'idea'] as TaskCategory[]).map((category) => (
-                            <button
-                              aria-label={`将「${item.text}」转为${categoryLabel[category]}任务`}
-                              className={styles[category]}
-                              disabled={convertingInboxItemIds.current.has(item.id)}
-                              type="button"
-                              key={category}
-                              onClick={() => convertInboxItem(item.id, category)}
-                            >
-                              {categoryIcon[category]} {categoryLabel[category]}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className={styles.inboxItemActions}>
-                          <button type="button" onClick={() => startConvertingInboxItem(item.id)} aria-label={`将「${item.text}」转为任务`}>转任务</button>
-                          <button type="button" onClick={() => updateInboxItemStatus(item.id, 'archived')} aria-label={`存档「${item.text}」`}>存档</button>
-                          <button type="button" onClick={() => updateInboxItemStatus(item.id, 'deleted')} aria-label={`删除「${item.text}」`}>删除</button>
-                        </div>
-                      )}
-                    </article>
-                  ))}
-                </div>
+                <>
+                  <div className={styles.inboxList}>
+                    {pendingInboxItems.map((item) => (
+                      <div className={styles.inboxItemGroup} key={item.id}>
+                        <article
+                          className={`${styles.inboxItem} ${draggedInboxItemId === item.id ? styles.draggingInboxItem : ''}`}
+                          draggable={convertingInboxItemId !== item.id}
+                          onDragEnd={handleInboxDragEnd}
+                          onDragStart={(event) => handleInboxDragStart(item.id, event)}
+                        >
+                          <p>{item.text}</p>
+                        </article>
+                        {convertingInboxItemId === item.id && (
+                          <div className={`${styles.categoryActions} ${styles.inboxCategoryChoices}`} aria-label="选择任务分类">
+                            {(['work', 'study', 'life', 'idea'] as TaskCategory[]).map((category) => (
+                              <button
+                                aria-label={`将「${item.text}」转为${categoryLabel[category]}任务`}
+                                className={styles[category]}
+                                disabled={convertingInboxItemIds.current.has(item.id)}
+                                type="button"
+                                key={category}
+                                onClick={() => convertInboxItem(item.id, category)}
+                              >
+                                {categoryLabel[category]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.inboxDropZones} aria-label="Inbox 拖拽操作区">
+                    <div
+                      className={`${styles.inboxDropZone} ${styles.convertDropZone} ${activeInboxDropZone === 'convert' ? styles.activeDropZone : ''}`}
+                      onDragLeave={() => setActiveInboxDropZone(null)}
+                      onDragOver={(event) => handleInboxDropZoneDragOver('convert', event)}
+                      onDrop={(event) => handleInboxDropZoneDrop('convert', event)}
+                    >
+                      <span>↗</span>
+                      <strong>转任务</strong>
+                    </div>
+                    <div
+                      className={`${styles.inboxDropZone} ${styles.deleteDropZone} ${activeInboxDropZone === 'delete' ? styles.activeDropZone : ''}`}
+                      onDragLeave={() => setActiveInboxDropZone(null)}
+                      onDragOver={(event) => handleInboxDropZoneDragOver('delete', event)}
+                      onDrop={(event) => handleInboxDropZoneDrop('delete', event)}
+                      aria-label="删除"
+                    >
+                      <span className={styles.trashIcon} aria-hidden="true" />
+                    </div>
+                  </div>
+                </>
               ) : (
                 inboxClearMessage && <p className={styles.inboxEmpty}>{inboxClearMessage}</p>
               )}
@@ -1184,6 +1268,42 @@ export function FocusFlowWidget() {
           </div>
         )}
 
+        {shouldShowPetNamingDialog && (
+          <div className={styles.petNamingScrim} role="dialog" aria-modal="true" aria-labelledby="pet-naming-title">
+            <section className={styles.petNamingDialog}>
+              <p className={styles.petNamingEyebrow}>First hello</p>
+              <h2 id="pet-naming-title">给你的伙伴取个名字</h2>
+              <p className={styles.petNamingCopy}>默认叫 Inky。你可以现在命名，也可以跳过之后再改。</p>
+              <input
+                className={styles.petNamingInput}
+                value={petNamingDraft}
+                onChange={(event) => {
+                  recordInteraction();
+                  setPetNamingDraft(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  confirmPetNaming();
+                }}
+                aria-label="首次宠物名字"
+                maxLength={8}
+                autoFocus
+              />
+              <div className={styles.petNamingActions}>
+                <button className={styles.petNamingSkipButton} type="button" onClick={skipPetNaming}>
+                  Skip
+                </button>
+                <button className={styles.confirmButton} type="button" onClick={confirmPetNaming}>
+                  确认
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
 
         {overlay === 'settings' && (
           <div className={styles.scrim}>

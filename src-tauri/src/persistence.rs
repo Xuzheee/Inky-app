@@ -3,8 +3,8 @@ use std::{path::Path, sync::Mutex};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-const DATABASE_VERSION: u8 = 3;
-const DEFAULT_PET_NAME: &str = "pet";
+const DATABASE_VERSION: u8 = 4;
+const DEFAULT_PET_NAME: &str = "Inky";
 const DEFAULT_PET_SET_ID: &str = "builtin:inky";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +18,7 @@ pub struct FocusFlowPersistedState {
     pub pet_set_id: String,
     pub inbox_items: Vec<InboxItemDto>,
     pub show_focus_return: bool,
+    pub has_completed_pet_naming: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +63,7 @@ pub fn default_state() -> FocusFlowPersistedState {
         pet_set_id: DEFAULT_PET_SET_ID.into(),
         inbox_items: Vec::new(),
         show_focus_return: true,
+        has_completed_pet_naming: false,
         mood: "好".into(),
         xp: 10,
         tasks: vec![
@@ -115,7 +117,8 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), rusqlite::Error>
               xp INTEGER NOT NULL CHECK (xp >= 0),
               pet_name TEXT NOT NULL,
               pet_set_id TEXT NOT NULL DEFAULT 'builtin:inky',
-              show_focus_return INTEGER NOT NULL DEFAULT 1 CHECK (show_focus_return IN (0, 1))
+              show_focus_return INTEGER NOT NULL DEFAULT 1 CHECK (show_focus_return IN (0, 1)),
+              has_completed_pet_naming INTEGER NOT NULL DEFAULT 0 CHECK (has_completed_pet_naming IN (0, 1))
             );
 
             CREATE TABLE inbox_items (
@@ -139,7 +142,7 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), rusqlite::Error>
               sort_order INTEGER NOT NULL
             );
 
-            PRAGMA user_version = 3;
+            PRAGMA user_version = 4;
             ",
         )?;
         let defaults = default_state();
@@ -152,8 +155,12 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), rusqlite::Error>
             ",
         )?;
         migrate_v2_to_v3(connection)?;
+        migrate_v3_to_v4(connection)?;
     } else if version == 2 {
         migrate_v2_to_v3(connection)?;
+        migrate_v3_to_v4(connection)?;
+    } else if version == 3 {
+        migrate_v3_to_v4(connection)?;
     } else if version > i64::from(DATABASE_VERSION) {
         return Err(rusqlite::Error::InvalidQuery);
     }
@@ -187,6 +194,18 @@ fn migrate_v2_to_v3(connection: &Connection) -> Result<(), rusqlite::Error> {
     )
 }
 
+fn migrate_v3_to_v4(connection: &Connection) -> Result<(), rusqlite::Error> {
+    if !app_state_has_column(connection, "has_completed_pet_naming")? {
+        connection.execute_batch(
+            "
+            ALTER TABLE app_state ADD COLUMN has_completed_pet_naming INTEGER NOT NULL DEFAULT 0 CHECK (has_completed_pet_naming IN (0, 1));
+            ",
+        )?;
+    }
+
+    connection.execute_batch("PRAGMA user_version = 4;")
+}
+
 fn app_state_has_column(connection: &Connection, column_name: &str) -> Result<bool, rusqlite::Error> {
     let mut statement = connection.prepare("PRAGMA table_info(app_state)")?;
     let mut rows = statement.query([])?;
@@ -203,20 +222,21 @@ fn app_state_has_column(connection: &Connection, column_name: &str) -> Result<bo
 }
 
 pub fn load_state(connection: &Connection) -> Result<FocusFlowPersistedState, rusqlite::Error> {
-    let (mood, xp, pet_name, pet_set_id, show_focus_return): (String, i64, String, String, bool) =
-        connection.query_row(
-            "SELECT mood, xp, pet_name, pet_set_id, show_focus_return FROM app_state WHERE id = 1",
-            [],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get::<_, i64>(4)? == 1,
-                ))
-            },
-        )?;
+    let (mood, xp, pet_name, pet_set_id, show_focus_return, has_completed_pet_naming):
+        (String, i64, String, String, bool, bool) = connection.query_row(
+        "SELECT mood, xp, pet_name, pet_set_id, show_focus_return, has_completed_pet_naming FROM app_state WHERE id = 1",
+        [],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get::<_, i64>(4)? == 1,
+                row.get::<_, i64>(5)? == 1,
+            ))
+        },
+    )?;
 
     let mut statement = connection.prepare(
         "
@@ -268,6 +288,7 @@ pub fn load_state(connection: &Connection) -> Result<FocusFlowPersistedState, ru
         pet_set_id,
         inbox_items,
         show_focus_return,
+        has_completed_pet_naming,
     })
 }
 
@@ -282,11 +303,18 @@ pub fn save_state(
 
     transaction.execute(
         "
-        INSERT INTO app_state (id, mood, xp, pet_name, pet_set_id, show_focus_return)
-        VALUES (1, ?1, ?2, ?3, ?4, ?5)
-        ON CONFLICT(id) DO UPDATE SET mood = excluded.mood, xp = excluded.xp, pet_name = excluded.pet_name, pet_set_id = excluded.pet_set_id, show_focus_return = excluded.show_focus_return
+        INSERT INTO app_state (id, mood, xp, pet_name, pet_set_id, show_focus_return, has_completed_pet_naming)
+        VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(id) DO UPDATE SET mood = excluded.mood, xp = excluded.xp, pet_name = excluded.pet_name, pet_set_id = excluded.pet_set_id, show_focus_return = excluded.show_focus_return, has_completed_pet_naming = excluded.has_completed_pet_naming
         ",
-        params![state.mood, state.xp, pet_name, pet_set_id, if state.show_focus_return { 1 } else { 0 }],
+        params![
+            state.mood,
+            state.xp,
+            pet_name,
+            pet_set_id,
+            if state.show_focus_return { 1 } else { 0 },
+            if state.has_completed_pet_naming { 1 } else { 0 },
+        ],
     )?;
     transaction.execute("DELETE FROM tasks", [])?;
     transaction.execute("DELETE FROM inbox_items", [])?;
@@ -456,7 +484,7 @@ mod tests {
 
     fn custom_state() -> FocusFlowPersistedState {
         FocusFlowPersistedState {
-            version: 3,
+            version: 4,
             mood: "一般".into(),
             xp: 42,
             pet_name: "小蓝".into(),
@@ -470,6 +498,7 @@ mod tests {
                 date: "2026-05-16".into(),
             }],
             show_focus_return: true,
+            has_completed_pet_naming: true,
             tasks: vec![
                 TaskDto {
                     id: "later".into(),
@@ -502,12 +531,12 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
 
-        let show_focus_return: i64 = database
+        let (show_focus_return, has_completed_pet_naming): (i64, i64) = database
             .connection
             .query_row(
-                "SELECT show_focus_return FROM app_state WHERE id = 1",
+                "SELECT show_focus_return, has_completed_pet_naming FROM app_state WHERE id = 1",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         let inbox_count: i64 = database
@@ -515,13 +544,15 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM inbox_items", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(schema_version, 3);
-        assert_eq!(state.version, 3);
+        assert_eq!(schema_version, 4);
+        assert_eq!(state.version, 4);
         assert_eq!(show_focus_return, 1);
+        assert_eq!(has_completed_pet_naming, 0);
+        assert!(!state.has_completed_pet_naming);
         assert_eq!(inbox_count, 0);
         assert_eq!(state.mood, "好");
         assert_eq!(state.xp, 10);
-        assert_eq!(state.pet_name, "pet");
+        assert_eq!(state.pet_name, "Inky");
         assert_eq!(state.pet_set_id, "builtin:inky");
         assert_eq!(state.tasks.len(), 3);
         assert_eq!(state.tasks[0].title, "回复导师邮件");
@@ -624,7 +655,7 @@ mod tests {
         save_state(&mut database.connection, &state).unwrap();
         let loaded = load_state(&database.connection).unwrap();
 
-        assert_eq!(loaded.pet_name, "pet");
+        assert_eq!(loaded.pet_name, "Inky");
     }
 
     #[test]
@@ -678,9 +709,10 @@ mod tests {
             .unwrap();
         let state = load_state(&connection).unwrap();
 
-        assert_eq!(schema_version, 3);
+        assert_eq!(schema_version, 4);
         assert_eq!(state.pet_set_id, "builtin:inky");
         assert_eq!(state.show_focus_return, true);
+        assert!(!state.has_completed_pet_naming);
         assert!(state.inbox_items.is_empty());
         assert_eq!(state.mood, "一般");
         assert_eq!(state.xp, 42);
@@ -737,12 +769,82 @@ mod tests {
             .unwrap();
         let state = load_state(&connection).unwrap();
 
-        assert_eq!(schema_version, 3);
+        assert_eq!(schema_version, 4);
         assert_eq!(show_focus_return, 1);
         assert_eq!(inbox_count, 0);
         assert!(state.show_focus_return);
+        assert!(!state.has_completed_pet_naming);
         assert!(state.inbox_items.is_empty());
         assert_eq!(state.pet_set_id, "local:fox");
         assert_eq!(state.mood, "烦");
+    }
+
+    #[test]
+    fn version_three_database_migrates_to_pet_naming_schema() {
+        let tempdir = tempdir().unwrap();
+        let database_path = tempdir.path().join("focusflow.sqlite3");
+        let connection = Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE app_state (
+                  id INTEGER PRIMARY KEY CHECK (id = 1),
+                  mood TEXT NOT NULL CHECK (mood IN ('好', '一般', '烦')),
+                  xp INTEGER NOT NULL CHECK (xp >= 0),
+                  pet_name TEXT NOT NULL,
+                  pet_set_id TEXT NOT NULL DEFAULT 'builtin:inky',
+                  show_focus_return INTEGER NOT NULL DEFAULT 1 CHECK (show_focus_return IN (0, 1))
+                );
+
+                CREATE TABLE inbox_items (
+                  id TEXT PRIMARY KEY,
+                  text TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK (status IN ('pending', 'converted', 'archived', 'deleted')),
+                  converted_task_id TEXT NULL,
+                  date TEXT NOT NULL,
+                  sort_order INTEGER NOT NULL
+                );
+
+                CREATE TABLE tasks (
+                  id TEXT PRIMARY KEY,
+                  title TEXT NOT NULL,
+                  category TEXT NOT NULL CHECK (category IN ('work', 'study', 'life', 'idea')),
+                  priority TEXT NOT NULL CHECK (priority IN ('high', 'medium', 'low')),
+                  completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+                  due TEXT NULL,
+                  completed_pomodoros INTEGER NOT NULL CHECK (completed_pomodoros >= 0),
+                  sort_order INTEGER NOT NULL
+                );
+
+                INSERT INTO app_state (id, mood, xp, pet_name, pet_set_id, show_focus_return)
+                VALUES (1, '好', 12, '小蓝', 'builtin:inky', 0);
+                INSERT INTO inbox_items (id, text, created_at, status, converted_task_id, date, sort_order)
+                VALUES ('inbox-1', 'Remember this', '2026-05-20T10:00:00Z', 'pending', NULL, '2026-05-20', 0);
+                PRAGMA user_version = 3;
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let connection = open_database(database_path).unwrap();
+        let schema_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let has_completed_pet_naming: i64 = connection
+            .query_row(
+                "SELECT has_completed_pet_naming FROM app_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let state = load_state(&connection).unwrap();
+
+        assert_eq!(schema_version, 4);
+        assert_eq!(has_completed_pet_naming, 0);
+        assert!(!state.has_completed_pet_naming);
+        assert!(!state.show_focus_return);
+        assert_eq!(state.pet_name, "小蓝");
+        assert_eq!(state.inbox_items.len(), 1);
     }
 }
