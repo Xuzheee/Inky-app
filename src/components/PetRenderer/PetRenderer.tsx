@@ -1,3 +1,4 @@
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { CSSProperties, useEffect, useState } from 'react';
 import { getPetLevelConfig, getPetSetConfig, type PetSetConfig, type PetSetId } from './petConfig';
 import styles from './PetRenderer.module.css';
@@ -12,7 +13,7 @@ interface PetRendererProps {
 
 function assetUrl(petSet: PetSetConfig, path: string) {
   if (!petSet.assetRoot) {
-    return `asset://localhost/${encodeURI(path)}`;
+    return convertFileSrc(path);
   }
 
   return `${import.meta.env.BASE_URL}${petSet.assetRoot}/${path}`;
