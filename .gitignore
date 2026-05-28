@@ -1,5 +1,10 @@
 .worktrees
 .worktrees/
+.claude/
+.superpowers/
+AGENTS.md
+CLAUDE.md
+docs/superpowers/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/scheduled_tasks.json
