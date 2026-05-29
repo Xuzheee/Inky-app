@@ -65,6 +65,10 @@ function formatTime(seconds: number) {
   return `${minutes}:${rest}`;
 }
 
+function formatInboxTime(isoString: string) {
+  return new Date(isoString).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 function callDesktopCommand(command: string, args?: Record<string, unknown>) {
   invoke(command, args).catch(() => undefined);
 }
@@ -1097,6 +1101,7 @@ export function FocusFlowWidget() {
                           onDragStart={(event) => handleInboxDragStart(item.id, event)}
                         >
                           <p>{item.text}</p>
+                          <time dateTime={item.createdAt}>{formatInboxTime(item.createdAt)}</time>
                         </article>
                         {convertingInboxItemId === item.id && (
                           <div className={`${styles.categoryActions} ${styles.inboxCategoryChoices}`} aria-label="选择任务分类">
