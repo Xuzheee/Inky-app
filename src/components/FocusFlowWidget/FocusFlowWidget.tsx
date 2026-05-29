@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxItem, Mood, OverlayState, TaskCategory, TaskPriority, ViewState } from '../../types';
 import { PetRenderer } from '../PetRenderer/PetRenderer';
 import { builtInPetSets, type PetSetConfig, type PetSetId } from '../PetRenderer/petConfig';
@@ -137,6 +137,7 @@ export function FocusFlowWidget() {
   const [overlay, setOverlay] = useState<OverlayState>('none');
   const [convertingInboxItemId, setConvertingInboxItemId] = useState<string | null>(null);
   const [draggedInboxItemId, setDraggedInboxItemId] = useState<string | null>(null);
+  const [draggedInboxPosition, setDraggedInboxPosition] = useState<{ x: number; y: number } | null>(null);
   const [activeInboxDropZone, setActiveInboxDropZone] = useState<'convert' | 'delete' | null>(null);
   const [view, setView] = useState<ViewState>('main');
   const [isMiniMode, setIsMiniMode] = useState(false);
@@ -149,6 +150,7 @@ export function FocusFlowWidget() {
   const parseRequestId = useRef(0);
   const convertingInboxItemIds = useRef(new Set<string>());
   const focusReturnCueTimer = useRef<number | null>(null);
+  const pointerDraggedInboxItemId = useRef<string | null>(null);
   const pomodoroAwardedForCycle = useRef(false);
   const [toast, setToast] = useState<Reminder | null>(null);
   const [miniHint, setMiniHint] = useState<Reminder | null>(null);
@@ -521,41 +523,62 @@ export function FocusFlowWidget() {
     setConvertingInboxItemId(itemId);
   }
 
-  function handleInboxDragStart(itemId: string, event: DragEvent<HTMLElement>) {
-    recordInteraction();
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', itemId);
-    setDraggedInboxItemId(itemId);
-  }
-
   function handleInboxDragEnd() {
+    pointerDraggedInboxItemId.current = null;
     setDraggedInboxItemId(null);
+    setDraggedInboxPosition(null);
     setActiveInboxDropZone(null);
   }
 
-  function handleInboxDropZoneDragOver(zone: 'convert' | 'delete', event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setActiveInboxDropZone(zone);
+  function getInboxDropZoneFromPoint(clientX: number, clientY: number) {
+    const element = document.elementFromPoint(clientX, clientY)?.closest('[data-inbox-drop-zone]');
+    const zone = element?.getAttribute('data-inbox-drop-zone');
+
+    return zone === 'convert' || zone === 'delete' ? zone : null;
   }
 
-  function handleInboxDropZoneDrop(zone: 'convert' | 'delete', event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const itemId = event.dataTransfer.getData('text/plain') || draggedInboxItemId;
+  function handleInboxPointerDown(itemId: string, event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0 || convertingInboxItemId === itemId) {
+      return;
+    }
 
-    setDraggedInboxItemId(null);
-    setActiveInboxDropZone(null);
+    recordInteraction();
+    pointerDraggedInboxItemId.current = itemId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggedInboxItemId(itemId);
+    setDraggedInboxPosition({ x: event.clientX, y: event.clientY });
+  }
+
+  function handleInboxPointerMove(event: ReactPointerEvent<HTMLElement>) {
+    if (!pointerDraggedInboxItemId.current) {
+      return;
+    }
+
+    setDraggedInboxPosition({ x: event.clientX, y: event.clientY });
+    setActiveInboxDropZone(getInboxDropZoneFromPoint(event.clientX, event.clientY));
+  }
+
+  function handleInboxPointerUp(event: ReactPointerEvent<HTMLElement>) {
+    const itemId = pointerDraggedInboxItemId.current;
+    pointerDraggedInboxItemId.current = null;
 
     if (!itemId) {
       return;
     }
+
+    const zone = getInboxDropZoneFromPoint(event.clientX, event.clientY);
+    setDraggedInboxItemId(null);
+    setDraggedInboxPosition(null);
+    setActiveInboxDropZone(null);
 
     if (zone === 'convert') {
       startConvertingInboxItem(itemId);
       return;
     }
 
-    updateInboxItemStatus(itemId, 'deleted');
+    if (zone === 'delete') {
+      updateInboxItemStatus(itemId, 'deleted');
+    }
   }
 
   function convertInboxItem(itemId: string, category: TaskCategory) {
@@ -1096,9 +1119,11 @@ export function FocusFlowWidget() {
                       <div className={styles.inboxItemGroup} key={item.id}>
                         <article
                           className={`${styles.inboxItem} ${draggedInboxItemId === item.id ? styles.draggingInboxItem : ''}`}
-                          draggable={convertingInboxItemId !== item.id}
-                          onDragEnd={handleInboxDragEnd}
-                          onDragStart={(event) => handleInboxDragStart(item.id, event)}
+                          style={draggedInboxItemId === item.id && draggedInboxPosition ? { left: draggedInboxPosition.x, top: draggedInboxPosition.y } : undefined}
+                          onPointerCancel={handleInboxDragEnd}
+                          onPointerDown={(event) => handleInboxPointerDown(item.id, event)}
+                          onPointerMove={handleInboxPointerMove}
+                          onPointerUp={handleInboxPointerUp}
                         >
                           <p>{item.text}</p>
                           <time dateTime={item.createdAt}>{formatInboxTime(item.createdAt)}</time>
@@ -1125,18 +1150,14 @@ export function FocusFlowWidget() {
                   <div className={styles.inboxDropZones} aria-label="Inbox 拖拽操作区">
                     <div
                       className={`${styles.inboxDropZone} ${styles.convertDropZone} ${activeInboxDropZone === 'convert' ? styles.activeDropZone : ''}`}
-                      onDragLeave={() => setActiveInboxDropZone(null)}
-                      onDragOver={(event) => handleInboxDropZoneDragOver('convert', event)}
-                      onDrop={(event) => handleInboxDropZoneDrop('convert', event)}
+                      data-inbox-drop-zone="convert"
                     >
                       <span>↗</span>
                       <strong>转任务</strong>
                     </div>
                     <div
                       className={`${styles.inboxDropZone} ${styles.deleteDropZone} ${activeInboxDropZone === 'delete' ? styles.activeDropZone : ''}`}
-                      onDragLeave={() => setActiveInboxDropZone(null)}
-                      onDragOver={(event) => handleInboxDropZoneDragOver('delete', event)}
-                      onDrop={(event) => handleInboxDropZoneDrop('delete', event)}
+                      data-inbox-drop-zone="delete"
                       aria-label="删除"
                     >
                       <span className={styles.trashIcon} aria-hidden="true" />
