@@ -42,6 +42,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "../docs/assets/inky-app.png"
+    ],
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

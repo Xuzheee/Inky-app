@@ -2,6 +2,8 @@
 
 Inky 是一个 Windows 桌面专注助手。它以一个透明、置顶的小窗陪你记录任务、收集突然冒出的想法、进入番茄钟专注，并通过一只会成长的宠物提供轻量反馈。
 
+![Inky desktop app preview](docs/assets/inky-app.png)
+
 ## 下载使用
 
 普通用户请到本仓库的 **Releases** 页面下载最新版 Windows 安装包。
